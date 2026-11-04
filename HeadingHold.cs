@@ -116,7 +116,7 @@ namespace HeadingHold
 
         /// <summary>
         /// Global Prefix matching VehicleAI.SimulationStep signature. Filters for CargoPlaneAI and PassengerPlaneAI, 
-        /// locking heading until 50m AGL.
+        /// locking heading until 100m AGL regardless of premature vanilla flag clearing.
         /// </summary>
         public static bool SimulationStepPrefix(ushort vehicleID, ref Vehicle vehicleData, ref Vehicle.Frame frameData)
         {
@@ -151,20 +151,19 @@ namespace HeadingHold
                 }
 
                 bool isTakingOff = (vehicleData.m_flags & Vehicle.Flags.TakingOff) != 0;
+                bool isTracked = _takeoffs.ContainsKey(vehicleID);
 
-                if (!isTakingOff)
+                // If it is neither taking off nor currently tracked by our mod, ignore it
+                if (!isTakingOff && !isTracked)
                 {
-                    if (_takeoffs.ContainsKey(vehicleID))
-                    {
-                        _takeoffs.Remove(vehicleID);
-                    }
                     return true;
                 }
 
                 Vector3 currentPos = frameData.m_position;
                 Quaternion currentRot = frameData.m_rotation;
 
-                if (!_takeoffs.TryGetValue(vehicleID, out TakeoffData tData))
+                // Initialize tracking data on the first takeoff frame
+                if (!isTracked)
                 {
                     Vector3 forward = currentRot * Vector3.forward;
                     forward.y = 0f;
@@ -177,7 +176,7 @@ namespace HeadingHold
                         forward.Normalize();
                     }
 
-                    tData = new TakeoffData
+                    TakeoffData tData = new TakeoffData
                     {
                         RunwayHeadingVector = forward,
                         TakeoffStartPosition = currentPos,
@@ -186,7 +185,8 @@ namespace HeadingHold
                     _takeoffs[vehicleID] = tData;
                 }
 
-                float heightGained = currentPos.y - tData.TakeoffStartY;
+                TakeoffData activeData = _takeoffs[vehicleID];
+                float heightGained = currentPos.y - activeData.TakeoffStartY;
 
                 // ALTITUDE GATE REACHED (100m AGL): Release tracking and let native game routing take over cleanly
                 if (heightGained >= 100f)
@@ -198,20 +198,20 @@ namespace HeadingHold
                 }
 
                 // --- 1. RUNWAY CENTERLINE & POSITION LOCK ---
-                Vector3 displacement = currentPos - tData.TakeoffStartPosition;
-                float forwardDist = Vector3.Dot(displacement, tData.RunwayHeadingVector);
+                Vector3 displacement = currentPos - activeData.TakeoffStartPosition;
+                float forwardDist = Vector3.Dot(displacement, activeData.RunwayHeadingVector);
                 if (forwardDist < 0f) forwardDist = 0f;
 
-                Vector3 idealXZ = tData.TakeoffStartPosition + (tData.RunwayHeadingVector * forwardDist);
+                Vector3 idealXZ = activeData.TakeoffStartPosition + (activeData.RunwayHeadingVector * forwardDist);
                 frameData.m_position = new Vector3(idealXZ.x, currentPos.y, idealXZ.z);
 
                 // --- 2. CONSTRAINED PATH TARGET PROJECTOR ---
                 Vector3 nativeTarget = new Vector3(vehicleData.m_targetPos0.x, vehicleData.m_targetPos0.y, vehicleData.m_targetPos0.z);
-                Vector3 targetDisplacement = nativeTarget - tData.TakeoffStartPosition;
-                float targetForwardDist = Vector3.Dot(targetDisplacement, tData.RunwayHeadingVector);
+                Vector3 targetDisplacement = nativeTarget - activeData.TakeoffStartPosition;
+                float targetForwardDist = Vector3.Dot(targetDisplacement, activeData.RunwayHeadingVector);
                 if (targetForwardDist < forwardDist + 10f) targetForwardDist = forwardDist + 50f;
 
-                Vector3 constrainedTarget = tData.TakeoffStartPosition + (tData.RunwayHeadingVector * targetForwardDist);
+                Vector3 constrainedTarget = activeData.TakeoffStartPosition + (activeData.RunwayHeadingVector * targetForwardDist);
                 constrainedTarget.y = nativeTarget.y;
 
                 Vector4 constrainedTargetV4 = new Vector4(constrainedTarget.x, constrainedTarget.y, constrainedTarget.z, vehicleData.m_targetPos0.w);
@@ -223,9 +223,9 @@ namespace HeadingHold
                 float currentPitch = Mathf.Asin(Mathf.Clamp(currentForward.y, -1f, 1f));
 
                 Vector3 lockedHeadingWithPitch = new Vector3(
-                    tData.RunwayHeadingVector.x * Mathf.Cos(currentPitch),
+                    activeData.RunwayHeadingVector.x * Mathf.Cos(currentPitch),
                     Mathf.Sin(currentPitch),
-                    tData.RunwayHeadingVector.z * Mathf.Cos(currentPitch)
+                    activeData.RunwayHeadingVector.z * Mathf.Cos(currentPitch)
                 ).normalized;
 
                 float currentSpeed = Mathf.Max(frameData.m_velocity.magnitude, 35f);
