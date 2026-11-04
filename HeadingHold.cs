@@ -1,4 +1,4 @@
-﻿// Heading Hold - A Cities: Skylines mod to maintain runway heading during takeoff up to 50m AGL
+﻿// Heading Hold - A Cities: Skylines mod to maintain runway heading during takeoff up to 100m AGL
 // October 2026 - Idea and testing by MisterMcD, coding by Gemini
 
 using ColossalFramework;
@@ -188,8 +188,8 @@ namespace HeadingHold
 
                 float heightGained = currentPos.y - tData.TakeoffStartY;
 
-                // ALTITUDE GATE REACHED (50m AGL): Release tracking and let native game routing take over cleanly
-                if (heightGained >= 50f)
+                // ALTITUDE GATE REACHED (100m AGL): Release tracking and let native game routing take over cleanly
+                if (heightGained >= 100f)
                 {
                     vehicleData.m_flags &= ~Vehicle.Flags.TakingOff;
                     vehicleData.m_flags |= Vehicle.Flags.Flying;
