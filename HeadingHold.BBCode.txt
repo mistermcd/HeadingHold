@@ -6,9 +6,9 @@ Tired of watching your cargo and passenger flights pull off radical 90-degree ba
 [h2]What it does:[/h2]
 [list]
 [*] [b]Strict Runway Heading:[/b] Forces commercial cargo and passenger planes to strictly maintain runway heading and wings-level attitude during initial climb.
-[*] [b]No Tail-Strikes:[/b] Prevents sudden, jerky yaw changes while keeping natural pitch intact.
+[*] [b]No Tail-Strikes:[/b] Prevents sudden, jerky yaw changes while keeping natural pitch intact (most of the time).
 [*] [b]Smart Filtering:[/b] Only applies to [b]CargoPlaneAI[/b] and [b]PassengerPlaneAI[/b]—private aircraft are left alone to fly however they want.
-[*] [b]Clean Handoff at 50m AGL:[/b] Once the aircraft safely clears the airport environment (50 meters above ground level), the mod steps aside, and hands the controls back to the flight plan!
+[*] [b]Clean Handoff at 100m AGL:[/b] Once the aircraft safely clears the airport environment (100 meters above ground level), the mod steps aside, and hands navigation back to the filed flight plan!
 [/list]
 
 [h2]Technical Details[/h2]
@@ -23,9 +23,10 @@ Source code and contributions are available on GitHub:
 
 [h2] A note from the author [/h2]
 
-Yes AI (Gemini) helped with the coding. This one was tricky going through a [b]lot[/b] of iterations and tesing. 
+Yes AI (Gemini) helped with the coding. This one was tricky - going through a [b]lot[/b] of iterations and tesing. 
 I've come up with a decent algorithm to fix another one of the pet peeves I've had with Skylines!
-Most of your pilots will now fly a smooth climbout, some of them are still Mavericks though!
-Have ATC get in touch with them to give them a number to call...
+
+Most of your pilots will now fly a smooth climbout, some of them are still mavericks though!
+Have ATC get in touch with those ones to give them a number to call...
 
 - McD
