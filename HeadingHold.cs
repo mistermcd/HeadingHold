@@ -1,20 +1,162 @@
-﻿// Heading Hold - A Cities: Skylines mod to maintain runway heading during takeoff up to 100m AGL
+﻿// Heading Hold - A Cities: Skylines mod to maintain runway heading during takeoff
 // October 2026 - Idea and testing by MisterMcD, coding by Gemini
+// Version 1.1 - Added Options panel and optimized code.
 
 using ColossalFramework;
+using ColossalFramework.UI;
 using HarmonyLib;
 using ICities;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
+using System.Xml.Serialization;
 using UnityEngine;
 
 namespace HeadingHold
 {
+    public static class Configuration
+    {
+        private static readonly string ConfigFilePath = "HeadingHoldConfig.xml";
+        public static bool Enabled { get; set; } = true;
+        public static float ReleaseAltitude { get; set; } = 100f;
+
+        public static void Load()
+        {
+            try
+            {
+                if (File.Exists(ConfigFilePath))
+                {
+                    using (var reader = new StreamReader(ConfigFilePath))
+                    {
+                        var xml = new XmlSerializer(typeof(ConfigData));
+                        var data = (ConfigData)xml.Deserialize(reader);
+                        Enabled = data.Enabled;
+                        ReleaseAltitude = Mathf.Clamp(data.ReleaseAltitude, 50f, 200f);
+                    }
+                }
+            }
+            catch
+            {
+                Enabled = true;
+                ReleaseAltitude = 100f;
+            }
+        }
+
+        public static void Save()
+        {
+            try
+            {
+                var data = new ConfigData { Enabled = Enabled, ReleaseAltitude = ReleaseAltitude };
+                using (var writer = new StreamWriter(ConfigFilePath))
+                {
+                    var xml = new XmlSerializer(typeof(ConfigData));
+                    xml.Serialize(writer, data);
+                }
+                Debug.Log("[Heading Hold] Configuration saved successfully.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Heading Hold] Failed to save configuration: {ex.Message}");
+            }
+        }
+
+        public class ConfigData
+        {
+            public bool Enabled { get; set; } = true;
+            public float ReleaseAltitude { get; set; } = 100f;
+        }
+    }
+
     public class ModEntry : IUserMod
     {
         public string Name => "Heading Hold";
         public string Description => "Planes will maintain runway heading during initial climb.";
+
+        public void OnEnabled()
+        {
+            Configuration.Load();
+        }
+
+        public void OnSettingsUI(UIHelperBase helper)
+        {
+            UIHelperBase group = helper.AddGroup("Heading Hold Settings");
+
+            group.AddCheckbox("Enabled", Configuration.Enabled, (value) =>
+            {
+                Configuration.Enabled = value;
+            });
+
+            UISlider targetSlider = null;
+            UILabel titleLabel = null;
+
+            var sliderComponent = group.AddSlider(
+                "Release Altitude",
+                50f,
+                200f,
+                10f,
+                Configuration.ReleaseAltitude,
+                (value) =>
+                {
+                    Configuration.ReleaseAltitude = value;
+                    if (titleLabel != null)
+                    {
+                        titleLabel.text = "Release Altitude: " + Mathf.RoundToInt(value) + "m";
+                    }
+                }
+            ) as UIComponent;
+
+            if (sliderComponent != null)
+            {
+                sliderComponent.tooltip = "Minimum altitude aircraft must achieve in straight level flight.";
+
+                targetSlider = sliderComponent.GetComponentInChildren<UISlider>();
+                if (targetSlider == null && sliderComponent is UISlider)
+                {
+                    targetSlider = (UISlider)sliderComponent;
+                }
+
+                var labels = sliderComponent.GetComponentsInChildren<UILabel>();
+                if (labels.Length == 0 && sliderComponent.parent != null)
+                {
+                    labels = sliderComponent.parent.GetComponentsInChildren<UILabel>();
+                }
+
+                foreach (var lbl in labels)
+                {
+                    if (lbl != null && lbl.text.Contains("Release Altitude"))
+                    {
+                        titleLabel = lbl;
+                        break;
+                    }
+                }
+
+                if (titleLabel != null)
+                {
+                    titleLabel.text = "Release Altitude: " + Mathf.RoundToInt(Configuration.ReleaseAltitude) + "m";
+                }
+            }
+
+            group.AddButton("Save Settings", () =>
+            {
+                Configuration.Save();
+            });
+
+            group.AddButton("Reset to Default (100m)", () =>
+            {
+                Configuration.Enabled = true;
+                Configuration.ReleaseAltitude = 100f;
+                if (targetSlider != null)
+                {
+                    targetSlider.value = 100f;
+                }
+                if (titleLabel != null)
+                {
+                    titleLabel.text = "Release Altitude: 100m";
+                }
+                Debug.Log("[Heading Hold] Settings reset to default. Hit 'Save Settings' to write to disk.");
+            });
+        }
     }
 
     public class HeadingHoldLoadingExtension : LoadingExtensionBase
@@ -46,6 +188,7 @@ namespace HeadingHold
         {
             if (_isPatched) return;
 
+            Configuration.Load();
             _harmony = new Harmony(HarmonyId);
             try
             {
@@ -115,27 +258,26 @@ namespace HeadingHold
         }
 
         /// <summary>
-        /// Global Prefix matching VehicleAI.SimulationStep signature. Filters for CargoPlaneAI and PassengerPlaneAI, 
-        /// locking heading until 100m AGL regardless of premature vanilla flag clearing.
+        /// Global Prefix matching VehicleAI.SimulationStep signature. Filters for CargoPlaneAI and PassengerPlaneAI 
+        /// using direct object references to ensure zero GC allocation overhead.
         /// </summary>
         public static bool SimulationStepPrefix(ushort vehicleID, ref Vehicle vehicleData, ref Vehicle.Frame frameData)
         {
             try
             {
+                if (!Configuration.Enabled)
+                {
+                    return true;
+                }
+
                 if (ReferenceEquals(vehicleData.Info, null) || ReferenceEquals(vehicleData.Info.m_vehicleAI, null))
                 {
                     return true;
                 }
 
-                Type aiType = vehicleData.Info.m_vehicleAI.GetType();
-                if (ReferenceEquals(aiType, null))
-                {
-                    return true;
-                }
-
-                string aiTypeName = aiType.Name;
-                if (ReferenceEquals(aiTypeName, null) ||
-                    (!aiTypeName.Contains("CargoPlaneAI") && !aiTypeName.Contains("PassengerPlaneAI")))
+                // Zero-allocation type check replacing string reflection
+                VehicleAI ai = vehicleData.Info.m_vehicleAI;
+                if (!(ai is CargoPlaneAI) && !(ai is PassengerPlaneAI))
                 {
                     return true;
                 }
@@ -153,7 +295,6 @@ namespace HeadingHold
                 bool isTakingOff = (vehicleData.m_flags & Vehicle.Flags.TakingOff) != 0;
                 bool isTracked = _takeoffs.ContainsKey(vehicleID);
 
-                // If it is neither taking off nor currently tracked by our mod, ignore it
                 if (!isTakingOff && !isTracked)
                 {
                     return true;
@@ -162,7 +303,6 @@ namespace HeadingHold
                 Vector3 currentPos = frameData.m_position;
                 Quaternion currentRot = frameData.m_rotation;
 
-                // Initialize tracking data on the first takeoff frame
                 if (!isTracked)
                 {
                     Vector3 forward = currentRot * Vector3.forward;
@@ -188,8 +328,8 @@ namespace HeadingHold
                 TakeoffData activeData = _takeoffs[vehicleID];
                 float heightGained = currentPos.y - activeData.TakeoffStartY;
 
-                // ALTITUDE GATE REACHED (100m AGL): Release tracking and let native game routing take over cleanly
-                if (heightGained >= 100f)
+                // ALTITUDE GATE REACHED: Release tracking and hand off cleanly
+                if (heightGained >= Configuration.ReleaseAltitude)
                 {
                     vehicleData.m_flags &= ~Vehicle.Flags.TakingOff;
                     vehicleData.m_flags |= Vehicle.Flags.Flying;
